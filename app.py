@@ -113,5 +113,16 @@ bot_app.add_handler(MessageHandler(filters.TEXT | filters.LOCATION, handle_messa
 async def startup():
     await bot_app.initialize()
     await bot_app.start()
-    await bot_app.updater.start_polling()
+    
+    # GANTI START_POLLING JADI WEBHOOK (Wajib pake URL render lo)
+    webhook_url = "https://project-adam-telgram.onrender.com"
+    await bot_app.bot.set_webhook(url=webhook_url)
+    
     asyncio.create_task(scheduler_task())
+
+# Tambahkan endpoint biar bot bisa nerima update dari Telegram
+@app.post("/")
+async def telegram_webhook(update: dict):
+    update_obj = Update.de_json(update, bot_app.bot)
+    await bot_app.process_update(update_obj)
+    return {"status": "ok"}
