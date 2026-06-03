@@ -50,21 +50,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if key_res.data:
             owner_id = key_res.data[0]['owner_id']
             res = supabase.table("schedules").select("*").eq("user_id", owner_id).execute()
-            msg = f"📅 Jadwal user {owner_id}:\n" + "\n".join([f"- {r['task']} ({r['time']})" for r in res.data])
+            msg = f"Jadwal user {owner_id}:\n" + "\n".join([f"- {r['task']} ({r['time']})" for r in res.data])
             await update.message.reply_text(msg)
         else:
             await update.message.reply_text("Key salah, bro.")
         return
 
-    # B. FITUR ADD JADWAL (NATURAL LANGUAGE)
+    # B. FITUR ADD JADWAL
     if "ingetin gue" in text.lower() and "jam" in text.lower():
         try:
             parts = text.lower().split("ingetin gue")[1].split("jam")
             task, time = parts[0].strip(), parts[1].strip()
-            supabase.table("schedules").insert({"user_id": chat_id, "task": task, "time": time}).execute()
+            
+            # Kita coba print ke log untuk memastikan kodenya masuk ke sini
+            print(f"DEBUG: Trying to insert -> Task: {task}, Time: {time}, User: {chat_id}")
+            
+            # Eksekusi insert
+            result = supabase.table("schedules").insert({
+                "user_id": chat_id, 
+                "task": task, 
+                "time": time
+            }).execute()
+            
+            print(f"DEBUG: Insert Success! Response: {result}")
             await update.message.reply_text(f"Okey, gue ingetin 10 menit sebelum jam {time} ya.")
-            return
-        except: pass
+            
+        except Exception as e:
+            # Ini bakal muncul di log Render kalau gagal
+            print(f"ERROR: Gagal insert ke DB: {e}")
+            await update.message.reply_text(f"Duh, gagal simpen jadwal: {str(e)}")
 
     # C. FITUR AI & LOCATION
     loc_str = f"{update.message.location.latitude}, {update.message.location.longitude}" if update.message.location else None
