@@ -1,24 +1,33 @@
 import os
-import logging
-import asyncio
 import sqlite3
-from datetime import datetime
+import asyncio
+import logging
+from datetime import datetime, timedelta
 from fastapi import FastAPI
-from telegram import Update, Bot
+from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
-from telegram.request import HTTPXRequest
 from groq import Groq
 
 # 1. Setup Logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
-# 2. Ambil Configuration
+# 2. Configuration
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") # Masukin ID dari @getmyid_bot
 client = Groq(api_key=GROQ_API_KEY)
+app = FastAPI()
 
-# 3. Database & Scheduler Setup
+# 3. Personality & AI Setup
+ADAM_SYSTEM_PROMPT = (
+    "Lo adalah Adam, asisten pribadi sekaligus sahabat Marcell (Tsem Li An). "
+    "Karakter: santai, asik, pinter, straight-forward, dan punya selera humor. "
+    "Bahasa: Gaul (lo/gue), nggak kaku. Marcell anak Ilkom BINUS, suka koding (Python/Data Science) "
+    "dan fashion luxury. Marcell tinggal di Tangerang. "
+    "Kalau dia tanya kodingan, kasih solusi logis. Kalau tanya makan, kasih rekomendasi di Tangerang. "
+    "Aturan: Singkat, padat, jangan pernah bilang 'ada yang bisa dibantu'."
+)
+
 def init_db():
     conn = sqlite3.connect("adam_data.db")
     conn.execute("CREATE TABLE IF NOT EXISTS schedules (id INTEGER PRIMARY KEY, task TEXT, time TEXT, reminded INTEGER DEFAULT 0)")
@@ -27,78 +36,67 @@ def init_db():
 
 init_db()
 
-app = FastAPI()
-bot_app = ApplicationBuilder().token(TOKEN).request(HTTPXRequest(connect_timeout=60.0)).build()
+async def get_ai_response(user_text, location=None):
+    prompt = f"Lokasi Marcell: {location}. " if location else ""
+    response = client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": ADAM_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt + user_text}
+        ],
+        model="llama-3.3-70b-versatile"
+    )
+    return response.choices[0].message.content
 
-# 4. Character Injection
-ADAM_CHARACTER = (
-    "Lo adalah Adam, teman curhat sekaligus asisten pribadi Marcell (Tsem Li An). "
-    "Karakter lo: asik, santai, pinter, dan straight-forward. "
-    "Gunakan bahasa sehari-hari yang luwes (lo/gue). Jangan kaku. "
-    "Lo paham Marcell adalah mahasiswa Ilmu Komputer di BINUS yang punya minat tinggi di "
-    "programming, data science, dan fashion luxury. "
-    "Lo tau saat ini Marcell ada di Tangerang, Banten, jadi kalau ada bahasan soal "
-    "tempat, cuaca, atau situasi di sini, lo bakal nyambung. "
-    "Kalau dia tanya soal tugas atau kodingan, kasih penjelasan logis. "
-    "Kalau dia lagi curhat, jadi pendengar yang suportif dan kasih opini jujur. "
-    "Singkat, padat, dan nggak usah banyak basa-basi 'ada yang bisa dibantu'."
-)
+# 4. Handlers
+async def add_sched(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("Format: /add_sched [Tugas] [HH:MM]")
+        return
+    task, time = " ".join(context.args[:-1]), context.args[-1]
+    conn = sqlite3.connect("adam_data.db")
+    conn.execute("INSERT INTO schedules (task, time, reminded) VALUES (?, ?, 0)", (task, time))
+    conn.commit()
+    conn.close()
+    await update.message.reply_text(f"Okey, gue ingetin 10 menit sebelum jam {time} ya.")
 
-async def get_ai_response(user_text):
-    try:
-        chat_completion = client.chat.completions.create(
-            messages=[{"role": "system", "content": ADAM_CHARACTER}, {"role": "user", "content": user_text}],
-            model="llama3-70b-8192",
-        )
-        return chat_completion.choices[0].message.content
-    except Exception as e:
-        logging.error(f"Error AI: {e}")
-        return "Lagi ada kendala nih, bentar ya coba lagi."
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    loc_str = None
+    if update.message.location:
+        loc_str = f"{update.message.location.latitude}, {update.message.location.longitude}"
+    
+    reply = await get_ai_response(update.message.text or "Yo", loc_str)
+    await update.message.reply_text(reply)
 
-# 5. Background Task (Auto-Reminder)
+# 5. Background Task (Scheduler)
 async def scheduler_task():
-    bot = Bot(token=TOKEN)
+    bot = bot_app.bot
     while True:
-        now = datetime.now().strftime("%H:%M")
+        now = datetime.now()
         conn = sqlite3.connect("adam_data.db")
-        due_tasks = conn.execute("SELECT id, task FROM schedules WHERE time = ? AND reminded = 0", (now,)).fetchall()
+        tasks = conn.execute("SELECT id, task, time FROM schedules WHERE reminded = 0").fetchall()
         
-        for task_id, task in due_tasks:
-            await bot.send_message(chat_id=CHAT_ID, text=f"⚠️ Woi, Marcell! Sekarang jam {now}, waktunya: {task}")
-            conn.execute("UPDATE schedules SET reminded = 1 WHERE id = ?", (task_id,))
+        for t_id, task, t_time in tasks:
+            task_dt = datetime.strptime(t_time, "%H:%M").replace(year=now.year, month=now.month, day=now.day)
+            if now >= (task_dt - timedelta(minutes=10)) and now < task_dt:
+                await bot.send_message(chat_id=CHAT_ID, text=f"Woi, 10 menit lagi ada: {task}!")
+                conn.execute("UPDATE schedules SET reminded = 1 WHERE id = ?", (t_id,))
         
         conn.commit()
         conn.close()
         await asyncio.sleep(60)
 
-# 6. Handlers
-async def add_sched(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 2:
-        await update.message.reply_text("Format salah. Pakai: /add_sched [Tugas] [HH:MM]")
-        return
-    task = " ".join(context.args[:-1])
-    time = context.args[-1]
-    conn = sqlite3.connect("adam_data.db")
-    conn.execute("INSERT INTO schedules (task, time, reminded) VALUES (?, ?, 0)", (task, time))
-    conn.commit()
-    conn.close()
-    await update.message.reply_text(f"Beresss. Jadwal '{task}' jam {time} udah gue standby-in.")
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ai_reply = await get_ai_response(update.message.text)
-    await update.message.reply_text(ai_reply)
-
+# 6. App Runner
+bot_app = ApplicationBuilder().token(TOKEN).build()
 bot_app.add_handler(CommandHandler("add_sched", add_sched))
-bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+bot_app.add_handler(MessageHandler(filters.TEXT | filters.LOCATION, handle_message))
 
-# 7. Startup Runner
 @app.on_event("startup")
-async def startup_event():
+async def startup():
     await bot_app.initialize()
     await bot_app.start()
-    asyncio.create_task(bot_app.updater.start_polling())
+    await bot_app.updater.start_polling()
     asyncio.create_task(scheduler_task())
 
 @app.get("/")
 async def root():
-    return {"status": "Adam is active and ready"}
+    return {"status": "Adam is active"}
