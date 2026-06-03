@@ -105,8 +105,11 @@ bot_app.add_handler(MessageHandler(filters.TEXT | filters.LOCATION, handle_messa
 async def startup():
     await bot_app.initialize()
     await bot_app.start()
+    
+    # GANTI KE WEBHOOK - Pastikan URL ini sesuai dengan domain Render lo
     webhook_url = "https://project-adam-telgram.onrender.com"
     await bot_app.bot.set_webhook(url=webhook_url)
+    
     asyncio.create_task(scheduler_task())
 
 @app.post("/")
