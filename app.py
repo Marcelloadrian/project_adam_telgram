@@ -64,9 +64,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # B. ADD JADWAL
-    if "ingetin gue" in text.lower() and "jam" in text.lower():
+    if "ingetin gw" in text.lower() and "jam" in text.lower():
         try:
-            parts = text.lower().split("ingetin gue")[1].split("jam")
+            parts = text.lower().split("ingetin gw")[1].split("jam")
             task, time = parts[0].strip(), parts[1].strip()
             
             supabase.table("schedules").insert({"user_id": chat_id, "task": task, "time": time}).execute()
