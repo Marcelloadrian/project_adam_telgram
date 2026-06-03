@@ -2,4 +2,5 @@ fastapi
 uvicorn
 groq
 geopy
+HTTPX
 python-telegram-bot
