@@ -32,6 +32,7 @@ ADAM_SYSTEM_PROMPT = (
     "3. KEJUJURAN MUTLAK: Soal jadwal (database/schedules), lo harus jujur dan faktual. "
     "4. NO GASLIGHTING: Jangan pernah bohong atau memanipulasi Marcell soal jadwal yang ada di sistem. "
     "5. Kalau di luar topik jadwal, lo bebas berekspresi sesuka hati (tetap asik/humoris)."
+    "6. jadwal ga boleh bohong kalau dari awal memang ga ada jadwal maka jangan pernah sekali kali bikin jadwal sendiri"
 )
 # 3. AI & DB Logic
 async def get_ai_response(user_text, location=None):
@@ -61,29 +62,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # B. FITUR ADD JADWAL
-    if "ingetin gue" in text.lower() and "jam" in text.lower():
+   if "ingetin gue" in text.lower() and "jam" in text.lower():
+        print(f"DEBUG: Chat terdeteksi buat jadwal: '{text}'") # INI PENTING
         try:
             parts = text.lower().split("ingetin gue")[1].split("jam")
             task, time = parts[0].strip(), parts[1].strip()
+            print(f"DEBUG: Parsed -> Task: {task}, Time: {time}") 
             
-            # Kita coba print ke log untuk memastikan kodenya masuk ke sini
-            print(f"DEBUG: Trying to insert -> Task: {task}, Time: {time}, User: {chat_id}")
-            
-            # Eksekusi insert
             result = supabase.table("schedules").insert({
                 "user_id": chat_id, 
                 "task": task, 
                 "time": time
             }).execute()
             
-            print(f"DEBUG: Insert Success! Response: {result}")
+            print(f"DEBUG: Supabase Insert Success!")
             await update.message.reply_text(f"Okey, gue ingetin 10 menit sebelum jam {time} ya.")
             
         except Exception as e:
-            # Ini bakal muncul di log Render kalau gagal
-            print(f"ERROR: Gagal insert ke DB: {e}")
-            await update.message.reply_text(f"Duh, gagal simpen jadwal: {str(e)}")
-
+            print(f"ERROR: Gagal insert: {e}")
+            await update.message.reply_text("Duh, gagal simpen jadwal.")
     # C. FITUR AI & LOCATION
     loc_str = f"{update.message.location.latitude}, {update.message.location.longitude}" if update.message.location else None
     reply = await get_ai_response(text, loc_str)
